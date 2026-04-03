@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import adminRoutes from "./routes/adminRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import emailRoutes from "./routes/emailRoutes.js"
-import contactRoutes from "../backend/routes/contactRoutes.js"
+import contactRoutes from "./routes/contactRoutes.js"
 
 import productRoutes from "./routes/productRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
