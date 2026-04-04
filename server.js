@@ -19,7 +19,7 @@ const app = express();
 
 // ✅ ADD CORS CONFIGURATION (BEFORE any routes)
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'], // Allow your frontend ports
+  origin: ['https://shoe-ecommerce-frontend-omega.vercel.app'], // Allow your frontend ports
   credentials: true,  // Allow cookies if needed
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
