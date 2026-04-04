@@ -101,7 +101,7 @@ router.post("/send-order-email", async (req, res) => {
                           <table role="presentation" width="100%" height="100%" cellspacing="0" cellpadding="0" border="0">
                             <tr>
                               <td align="center" valign="middle">
-                                <img src="https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQmqh-ojQ4TK6a2fZVYi3wC7pM9qRsHzMAPUp_sl4k3-eT9ydMf" alt="checkmark" width="50" height="50">
+                                <span style="font-size:48px; color:#7aab8a;">✓</span>
                               </td>
                             </tr>
                           </table>
@@ -362,15 +362,17 @@ router.post("/send-order-email", async (req, res) => {
                 <!-- ── SUPPORT ── -->
                 <tr>
                   <td align="center" style="padding:32px 48px 40px;">
-                    <p style="margin:0 0 6px;font-size:12px;font-weight:300;color:#4a4540;letter-spacing:0.04em;">
-                      Questions about your order?
-                    </p>
-                    <a href="https://wa.me/2349033080879"
-                      style="font-size:11px;font-weight:400;letter-spacing:0.16em;text-transform:uppercase;
-                        color:#c49c68;text-decoration:none;border-bottom:1px solid rgba(196,156,104,0.35);
-                        padding-bottom:2px;">
-                      Contact Support
-                    </a>
+                   <p style="margin:0 0 6px;font-size:12px;font-weight:300;color:#4a4540;letter-spacing:0.04em;">
+      Questions about your order?
+    </p>
+    
+  
+    <a href="https://joftasolemates.com.ng/contact"
+      style="font-size:11px;font-weight:400;letter-spacing:0.16em;text-transform:uppercase;
+        color:#c49c68;text-decoration:none;border-bottom:1px solid rgba(196,156,104,0.35);
+        padding-bottom:2px;display:inline-block;margin:0 8px;">
+      Chat on WhatsApp
+    </a>
                   </td>
                 </tr>
  
