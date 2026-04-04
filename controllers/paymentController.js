@@ -1,30 +1,24 @@
 import axios from "axios";
 import Order from "../models/Order.js";
 import dotenv from "dotenv";
-import Product from "../models/Product.js"; // ✅ ADD THIS
+import Product from "../models/Product.js";
 import crypto from "crypto";
-
-
 
 dotenv.config();
 
-// ✅ Add this check
+// Check for Paystack secret key
 if (!process.env.PAYSTACK_SECRET_KEY) {
   console.error("FATAL: PAYSTACK_SECRET_KEY is not set");
-  
 }
 
 export const initializePayment = async (req, res) => {
-  // ✅ Add this debug log
   console.log("=== PAYMENT INITIALIZATION REQUEST ===");
-  console.log("Request body:", JSON.stringify(req.body, null, 2));
   console.log("Email:", req.body?.email);
   console.log("Cart length:", req.body?.cart?.length);
-  console.log("Shipping:", req.body?.shipping);
   
   const { email, cart, shipping } = req.body;
 
-  // ✅ Check each validation step
+  // Validation
   if (!cart || !Array.isArray(cart) || cart.length === 0) {
     console.log("❌ Validation failed: Cart is empty or invalid");
     return res.status(400).json({ success: false, message: "Cart is empty or invalid" });
@@ -32,7 +26,6 @@ export const initializePayment = async (req, res) => {
 
   if (!shipping?.name || !shipping?.email || !shipping?.phone || !shipping?.address) {
     console.log("❌ Validation failed: Incomplete shipping details");
-    console.log("Shipping received:", shipping);
     return res.status(400).json({ success: false, message: "Incomplete shipping details" });
   }
 
@@ -41,7 +34,14 @@ export const initializePayment = async (req, res) => {
     return res.status(400).json({ success: false, message: "Email is required" });
   }
 
+  // Email validation
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ success: false, message: "Valid email is required" });
+  }
+
   console.log("✅ Validation passed, processing payment...");
+  
   try {
     const productIds = cart.map(item => item._id);
     const products = await Product.find({ _id: { $in: productIds } });
@@ -54,11 +54,6 @@ export const initializePayment = async (req, res) => {
       const product = products.find(p => p._id.toString() === item._id.toString());
       if (!product) throw new Error(`Product not found: ${item._id}`);
       if (!item.quantity || item.quantity < 1) throw new Error(`Invalid quantity for: ${item._id}`);
-      
-      // ✅ Check stock availability
-      if (product.stock < item.quantity) {
-        throw new Error(`Insufficient stock for ${product.name}`);
-      }
       
       return {
         _id: product._id,
@@ -111,7 +106,7 @@ export const initializePayment = async (req, res) => {
       success: true,
       reference,
       amount: amountInKobo,
-      authorization_url: paystackRes.data.data.authorization_url, // ✅ Add this for redirect
+      authorization_url: paystackRes.data.data.authorization_url,
     });
 
   } catch (error) {
@@ -147,12 +142,37 @@ export const paystackWebhook = async (req, res) => {
     const data = event.data;
 
     try {
-      // ✅ Update existing pending order instead of creating new
-      const order = await Order.findOne({ paymentReference: data.reference });
+      // ✅ Validate amount FIRST
+      const expectedAmountKobo = data.metadata?.expectedAmountKobo;
+      if (!expectedAmountKobo || data.amount !== expectedAmountKobo) {
+        console.error(`[Webhook] Amount mismatch on ref ${data.reference}`);
+        return res.status(200).send("OK");
+      }
+
+      // ✅ Find or create order
+      let order = await Order.findOne({ paymentReference: data.reference });
       
       if (!order) {
-        console.error(`[Webhook] No pending order for ref: ${data.reference}`);
-        return res.status(200).send("OK");
+        // Create order from webhook data
+        order = await Order.create({
+          customerName: data.metadata?.customerName,
+          email: data.customer?.email,
+          phone: data.metadata?.phone,
+          items: data.metadata?.cart || [],
+          shipping: data.metadata?.shipping,
+          total: data.amount / 100,
+          paymentReference: data.reference,
+          status: "paid",
+          source: "webhook",
+          paymentDetails: {
+            amount: data.amount / 100,
+            paidAt: new Date(),
+            transactionId: data.id,
+            channel: data.channel,
+            reference: data.reference,
+          },
+        });
+        console.log(`[Webhook] Created new order for ref: ${data.reference}`);
       }
       
       if (order.status === "paid") {
@@ -160,13 +180,7 @@ export const paystackWebhook = async (req, res) => {
         return res.status(200).send("OK");
       }
 
-      const expectedAmountKobo = data.metadata?.expectedAmountKobo;
-      if (!expectedAmountKobo || data.amount !== expectedAmountKobo) {
-        console.error(`[Webhook] Amount mismatch on ref ${data.reference}`);
-        return res.status(200).send("OK");
-      }
-
-      // ✅ Update order status
+      // ✅ Update order status (NO STOCK DEDUCTION)
       order.status = "paid";
       order.paymentDetails = {
         amount: data.amount / 100,
@@ -177,17 +191,10 @@ export const paystackWebhook = async (req, res) => {
       };
       await order.save();
 
-      // ✅ Deduct stock
-      const updateStockPromises = order.items.map(async (item) => {
-        await Product.findByIdAndUpdate(item._id, {
-          $inc: { stock: -item.quantity }
-        });
-      });
-      await Promise.all(updateStockPromises);
-
-      console.log(`[Webhook] Order ${order._id} marked as paid, stock deducted`);
+      console.log(`[Webhook] Order ${order._id} marked as paid`);
     } catch (err) {
       console.error("[Webhook] Error:", err);
+      // Still return 200 to prevent Paystack retries
     }
   }
 
@@ -230,7 +237,7 @@ export const verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: "Payment amount mismatch" });
     }
 
-    // ✅ Update or create order
+    // ✅ Update or create order (NO STOCK DEDUCTION)
     let order = await Order.findOne({ paymentReference: reference });
     
     if (order) {
@@ -259,14 +266,6 @@ export const verifyPayment = async (req, res) => {
           transactionId: paymentData.id,
         },
       });
-      
-      // Deduct stock
-      const updateStockPromises = cart.map(async (item) => {
-        await Product.findByIdAndUpdate(item._id, {
-          $inc: { stock: -item.quantity }
-        });
-      });
-      await Promise.all(updateStockPromises);
     }
 
     return res.status(200).json({
@@ -281,7 +280,7 @@ export const verifyPayment = async (req, res) => {
   }
 };
 
-// ✅ Add this helper endpoint
+// Get order status helper endpoint
 export const getOrderStatus = async (req, res) => {
   const { reference } = req.params;
   
