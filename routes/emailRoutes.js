@@ -40,7 +40,7 @@ router.post("/send-order-email", async (req, res) => {
 
   try {
     await resend.emails.send({
-      from: from: "Jofta Solemates <orders@joftasolemates.com.ng>",  
+      from:"Jofta Solemates <orders@joftasolemates.com.ng>",  
       to: email,
       subject: `Order Confirmation - ₦${total.toFixed(2)}`,
       html: `
