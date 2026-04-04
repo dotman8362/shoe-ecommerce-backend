@@ -19,7 +19,7 @@ const app = express();
 
 // ✅ ADD CORS CONFIGURATION (BEFORE any routes)
 app.use(cors({
-  origin: ['https://shoe-ecommerce-frontend-omega.vercel.app'], // Allow your frontend ports
+  origin: ['https://www.joftasolemates.com.ng'], // Allow your frontend ports
   credentials: true,  // Allow cookies if needed
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
