@@ -79,7 +79,7 @@ app.use(cors({
 }));
 
 // Handle preflight requests
-app.options('*', cors());
+
 
 // ============================================
 // 4. REQUEST SIZE LIMITS
