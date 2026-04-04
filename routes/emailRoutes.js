@@ -6,6 +6,10 @@ dotenv.config();
 const router = express.Router();
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Admin email address - change this to your actual admin email
+// ✅ Get admin email from environment variable
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+
 router.post("/send-order-email", async (req, res) => {
   const { shipping, cart, total, email } = req.body;
 
@@ -17,6 +21,9 @@ router.post("/send-order-email", async (req, res) => {
     return res.status(400).json({ message: "Missing email" });
   }
 
+  // Generate order ID for tracking
+  const orderId = Math.random().toString(36).substring(2, 10).toUpperCase();
+  
   // Format cart items for email
   const cartItemsHtml = cart
     .map(
@@ -39,11 +46,12 @@ router.post("/send-order-email", async (req, res) => {
   });
 
   try {
-    await resend.emails.send({
-      from:"Jofta Solemates <orders@joftasolemates.com.ng>",  
+    // 1. Send email to CUSTOMER (same as before)
+    const customerEmail = await resend.emails.send({
+      from: "Jofta Solemates <orders@joftasolemates.com.ng>",
       to: email,
-      subject: `Order Confirmation - ₦${total.toFixed(2)}`,
-      html: `
+      subject: `Order Confirmation #${orderId} - ₦${total.toFixed(2)}`,
+       html: `
          <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -410,10 +418,103 @@ router.post("/send-order-email", async (req, res) => {
     `,
     });
 
-    res.json({ message: "Email sent successfully" });
+    // 2. Send email to ADMIN
+    const adminEmailHtml = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Order Alert — Jofta Solemates</title>
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #0e0c0a; color: #f0ebe3; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 0 auto; background: #141210; padding: 40px; border-radius: 8px; }
+          h1 { color: #c49c68; }
+          .badge { display: inline-block; background: #c49c68; color: #0e0c0a; padding: 4px 12px; border-radius: 4px; font-size: 12px; margin-bottom: 10px; }
+          .order-details { background: #1a1714; padding: 20px; border-radius: 4px; margin: 20px 0; }
+          .customer-info { background: #1a1714; padding: 20px; border-radius: 4px; margin: 20px 0; }
+          .total { font-size: 24px; color: #c49c68; }
+          table { width: 100%; border-collapse: collapse; }
+          th { text-align: left; padding: 12px; color: #c49c68; border-bottom: 1px solid rgba(255,255,255,0.07); }
+          td { padding: 12px; }
+          .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #333; font-size: 12px; color: #8a8178; text-align: center; }
+          .admin-link { color: #c49c68; text-decoration: none; border-bottom: 1px solid rgba(196,156,104,0.3); }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="badge">🔔 NEW ORDER ALERT</div>
+          <h1>New Order Received!</h1>
+          
+          <div class="customer-info">
+            <h3>Customer Information</h3>
+            <p><strong>Name:</strong> ${shipping.name}</p>
+            <p><strong>Email:</strong> ${shipping.email}</p>
+            <p><strong>Phone:</strong> ${shipping.phone}</p>
+            <p><strong>Order Date:</strong> ${orderDate}</p>
+            <p><strong>Order ID:</strong> #${orderId}</p>
+          </div>
+          
+          <div class="order-details">
+            <h3>Order Summary</h3>
+            <table>
+              <thead>
+                <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+              </thead>
+              <tbody>
+                ${cart.map(item => `
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.07);">
+                    <td style="padding: 12px; color: #f0ebe3;">${item.name}</td>
+                    <td style="padding: 12px; text-align: center; color: #8a8178;">${item.quantity}</td>
+                    <td style="padding: 12px; text-align: right; color: #c49c68;">₦${item.price.toLocaleString()}</td>
+                    <td style="padding: 12px; text-align: right; color: #f0ebe3;">₦${(item.price * item.quantity).toLocaleString()}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+            <p class="total" style="margin-top: 20px;">Total: ₦${total.toLocaleString()}</p>
+          </div>
+          
+          <div class="customer-info">
+            <h3>Shipping Address</h3>
+            <p>${shipping.address}</p>
+            <p>${shipping.city}, ${shipping.state} ${shipping.zip || ""}</p>
+            ${shipping.deliveryNotes ? `<p><strong>Delivery Notes:</strong> ${shipping.deliveryNotes}</p>` : ""}
+          </div>
+          
+          <div class="footer">
+            <p>Login to your <a href="https://joftasolemates.com.ng/admin" class="admin-link">Admin Dashboard</a> to manage this order.</p>
+            <p>Jofta Solemates Admin Portal</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const adminEmail = await resend.emails.send({
+      from: "Jofta Solemates <orders@joftasolemates.com.ng>",
+      to: [ADMIN_EMAIL],
+      subject: `🔔 NEW ORDER #${orderId} - ₦${total.toLocaleString()}`,
+      html: adminEmailHtml,
+    });
+
+    console.log(`✅ Order emails sent - Customer: ${email}, Admin: ${ADMIN_EMAIL}`);
+    console.log(`📧 Customer Email ID: ${customerEmail.data?.id}`);
+    console.log(`📧 Admin Email ID: ${adminEmail.data?.id}`);
+
+    res.json({ 
+      message: "Emails sent successfully", 
+      customerEmailSent: true, 
+      adminEmailSent: true,
+      orderId 
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Email failed" });
+    console.error("Email sending error:", error);
+    res.status(500).json({ 
+      message: "Email failed", 
+      error: error.message 
+    });
   }
 });
 
