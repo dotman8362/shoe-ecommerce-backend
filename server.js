@@ -17,6 +17,10 @@ dotenv.config();
 
 const app = express();
 
+// ✅ CRITICAL: Enable trust proxy - REQUIRED for Render
+// This allows express-rate-limit to get real client IPs behind Render's proxy
+app.set('trust proxy', true);
+
 // ============================================
 // 1. SECURITY HEADERS (Helmet)
 // ============================================
@@ -43,6 +47,11 @@ const globalLimiter = rateLimit({
   message: { success: false, message: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
+  // Optional: Add key generator for even better IP handling
+  keyGenerator: (req) => {
+    // After enabling trust proxy, req.ip will contain the real client IP
+    return req.ip;
+  },
 });
 
 // Stricter limiter for sensitive routes
@@ -50,6 +59,9 @@ const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // 10 requests per IP
   message: { success: false, message: "Too many attempts, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
 });
 
 app.use(globalLimiter);
