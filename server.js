@@ -186,12 +186,30 @@ mongoose.connect(process.env.MONGO_URI)
   });
 
 // ============================================
-// 11. GRACEFUL SHUTDOWN
+// 11. GRACEFUL SHUTDOWN (FIXED for Mongoose v7+)
 // ============================================
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM signal received: closing HTTP server');
-  mongoose.connection.close(() => {
-    console.log('MongoDB connection closed');
-    process.exit(0);
+  
+  // Close the Express server first
+  const server = app.listen(PORT);
+  
+  server.close(async () => {
+    console.log('HTTP server closed');
+    try {
+      // ✅ Mongoose v7+ uses promises, not callbacks
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed');
+      process.exit(0);
+    } catch (err) {
+      console.error('Error closing MongoDB connection:', err);
+      process.exit(1);
+    }
   });
+  
+  // Force close after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('Could not close connections in time, forcing shutdown');
+    process.exit(1);
+  }, 10000);
 });
