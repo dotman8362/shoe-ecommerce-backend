@@ -131,14 +131,13 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 
 // ============================================
-// 7. HEALTH CHECK (no rate limit)
+// 7. HEALTH CHECK (Keep it SIMPLE and SMALL)
 // ============================================
 app.get("/health", (req, res) => {
+  // ✅ Keep response VERY small to avoid cron-job.org "Response data too big" error
   res.status(200).json({ 
-    status: "OK", 
-    timestamp: new Date(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV
+    status: "ok",
+    time: Date.now()
   });
 });
 
