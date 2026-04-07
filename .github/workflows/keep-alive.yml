@@ -1,0 +1,23 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # Every 10 minutes
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Backend
+        run: |
+          echo "🌐 Pinging backend at $(date)"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://jofta-backend.onrender.com/health)
+          echo "HTTP Status: $RESPONSE"
+          if [[ "$RESPONSE" == "200" ]]; then
+            echo "✅ Backend is awake!"
+          else
+            echo "⚠️ Got status $RESPONSE, retrying in 30 seconds..."
+            sleep 30
+            curl -s -o /dev/null -w "Retry status: %{http_code}" https://jofta-backend.onrender.com/health
+          fi
