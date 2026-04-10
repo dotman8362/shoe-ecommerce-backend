@@ -41,19 +41,23 @@ app.use(helmet({
 // ============================================
 // 2. RATE LIMITING (Prevents DoS attacks)
 // ============================================
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per IP
-  message: { success: false, message: "Too many requests, please try again later." },
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Optional: Add key generator for even better IP handling
+
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
   keyGenerator: (req) => {
-    // After enabling trust proxy, req.ip will contain the real client IP
-    return req.ip;
-  },
+    // Use the ipKeyGenerator helper
+    return rateLimit.ipKeyGenerator(req);
+  }
 });
 
+// Or simply remove custom keyGenerator if you don't need it:
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100
+  // No custom keyGenerator needed - uses IP by default correctly
+});
 // Stricter limiter for sensitive routes
 const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
