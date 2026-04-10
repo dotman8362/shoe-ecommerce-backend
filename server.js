@@ -18,7 +18,9 @@ dotenv.config();
 const app = express();
 
 // ✅ CRITICAL: Enable trust proxy - REQUIRED for Render
-app.set('trust proxy', true);
+// ❌ DO NOT use 'true' - it's a security vulnerability
+// ✅ Use the number of proxies (Render uses 1 proxy)
+app.set('trust proxy', 1);  // FIXED: Changed from 'true' to 1
 
 // ============================================
 // 1. SECURITY HEADERS (Helmet)
@@ -57,9 +59,10 @@ const strictLimiter = rateLimit({
   message: { success: false, message: "Too many attempts, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  // If you need custom key logic, use the helper:
+  // Using ipKeyGenerator helper for IPv6 support
   keyGenerator: (req) => {
-    return rateLimit.ipKeyGenerator(req);
+    // ipKeyGenerator expects an IP string, not the request object
+    return rateLimit.ipKeyGenerator(req.ip);
   }
 });
 
@@ -133,6 +136,15 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Optional debug route to verify IP detection (remove in production)
+app.get("/debug-ip", (req, res) => {
+  res.json({
+    ip: req.ip,
+    xForwardedFor: req.headers['x-forwarded-for'],
+    trustProxy: app.get('trust proxy')
+  });
+});
+
 // ============================================
 // 8. ERROR HANDLING MIDDLEWARE
 // ============================================
@@ -175,6 +187,7 @@ mongoose.connect(process.env.MONGO_URI)
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✅ CORS enabled for: ${allowedOrigins.join(', ')}`);
+      console.log(`🔒 Trust proxy setting: ${app.get('trust proxy')}`);
     });
     
     // ============================================
