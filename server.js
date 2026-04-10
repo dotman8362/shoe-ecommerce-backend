@@ -18,7 +18,6 @@ dotenv.config();
 const app = express();
 
 // ✅ CRITICAL: Enable trust proxy - REQUIRED for Render
-// This allows express-rate-limit to get real client IPs behind Render's proxy
 app.set('trust proxy', true);
 
 // ============================================
@@ -42,22 +41,15 @@ app.use(helmet({
 // 2. RATE LIMITING (Prevents DoS attacks)
 // ============================================
 
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
-  keyGenerator: (req) => {
-    // Use the ipKeyGenerator helper
-    return rateLimit.ipKeyGenerator(req);
-  }
+// General limiter for most routes (NO custom keyGenerator needed)
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 100, // 100 requests per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  // No custom keyGenerator - uses IP correctly by default
 });
 
-// Or simply remove custom keyGenerator if you don't need it:
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100
-  // No custom keyGenerator needed - uses IP by default correctly
-});
 // Stricter limiter for sensitive routes
 const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -65,13 +57,17 @@ const strictLimiter = rateLimit({
   message: { success: false, message: "Too many attempts, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip,
+  // If you need custom key logic, use the helper:
+  keyGenerator: (req) => {
+    return rateLimit.ipKeyGenerator(req);
+  }
 });
 
-app.use(globalLimiter);
+// Apply general limiter to all routes by default
+app.use(generalLimiter);
 
 // ============================================
-// 3. CORS CONFIGURATION (ONCE, correctly)
+// 3. CORS CONFIGURATION
 // ============================================
 const allowedOrigins = [
   'https://www.joftasolemates.com.ng',
@@ -94,9 +90,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Paystack-Signature'],
 }));
 
-// Handle preflight requests
-
-
 // ============================================
 // 4. REQUEST SIZE LIMITS
 // ============================================
@@ -106,12 +99,10 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 // ============================================
 // 5. WEBHOOK - MUST be BEFORE express.json() for raw body
 // ============================================
-// Webhook needs raw body for signature verification
 app.post(
   "/api/payment/webhook/paystack",
   express.raw({ type: "application/json" }),
   async (req, res) => {
-    // Forward to payment controller
     const { paystackWebhook } = await import("./controllers/paymentController.js");
     return paystackWebhook(req, res);
   }
@@ -120,25 +111,22 @@ app.post(
 // ============================================
 // 6. REGULAR ROUTES (after webhook)
 // ============================================
-// Public routes with strict rate limiting
+// Apply strict limiter to sensitive routes
 app.use("/api/admin", strictLimiter, adminRoutes);
+app.use("/api/payment", strictLimiter, paymentRoutes);
+
+// Routes with general limiter (inherited from app.use(generalLimiter))
 app.use("/api", emailRoutes);
 app.use("/api", contactRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/newsletter", newsletterRoutes);
-
-// Payment routes (sensitive)
-app.use("/api/payment", strictLimiter, paymentRoutes);
-
-// Read-only routes (more lenient)
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 
 // ============================================
-// 7. HEALTH CHECK (Keep it SIMPLE and SMALL)
+// 7. HEALTH CHECK
 // ============================================
 app.get("/health", (req, res) => {
-  // ✅ Keep response VERY small to avoid cron-job.org "Response data too big" error
   res.status(200).json({ 
     status: "ok",
     time: Date.now()
@@ -174,45 +162,48 @@ app.use((req, res) => {
 // ============================================
 const PORT = process.env.PORT || 5000;
 
+// Make sure MONGO_URI is defined
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI is not defined in environment variables");
+  process.exit(1);
+}
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB Connected");
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✅ CORS enabled for: ${allowedOrigins.join(', ')}`);
     });
+    
+    // ============================================
+    // 11. GRACEFUL SHUTDOWN
+    // ============================================
+    process.on('SIGTERM', async () => {
+      console.log('SIGTERM signal received: closing HTTP server');
+      
+      server.close(async () => {
+        console.log('HTTP server closed');
+        try {
+          await mongoose.connection.close();
+          console.log('MongoDB connection closed');
+          process.exit(0);
+        } catch (err) {
+          console.error('Error closing MongoDB connection:', err);
+          process.exit(1);
+        }
+      });
+      
+      setTimeout(() => {
+        console.error('Could not close connections in time, forcing shutdown');
+        process.exit(1);
+      }, 10000);
+    });
+    
   })
   .catch(err => {
     console.error("❌ MongoDB connection error:", err);
+    console.error("💡 Make sure your IP is whitelisted in MongoDB Atlas");
     process.exit(1);
   });
-
-// ============================================
-// 11. GRACEFUL SHUTDOWN (FIXED for Mongoose v7+)
-// ============================================
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  
-  // Close the Express server first
-  const server = app.listen(PORT);
-  
-  server.close(async () => {
-    console.log('HTTP server closed');
-    try {
-      // ✅ Mongoose v7+ uses promises, not callbacks
-      await mongoose.connection.close();
-      console.log('MongoDB connection closed');
-      process.exit(0);
-    } catch (err) {
-      console.error('Error closing MongoDB connection:', err);
-      process.exit(1);
-    }
-  });
-  
-  // Force close after 10 seconds if graceful shutdown fails
-  setTimeout(() => {
-    console.error('Could not close connections in time, forcing shutdown');
-    process.exit(1);
-  }, 10000);
-});
