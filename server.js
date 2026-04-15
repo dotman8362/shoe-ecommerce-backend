@@ -18,9 +18,7 @@ dotenv.config();
 const app = express();
 
 // ✅ CRITICAL: Enable trust proxy - REQUIRED for Render
-// ❌ DO NOT use 'true' - it's a security vulnerability
-// ✅ Use the number of proxies (Render uses 1 proxy)
-app.set('trust proxy', 1);  // FIXED: Changed from 'true' to 1
+app.set('trust proxy', 1);
 
 // ============================================
 // 1. SECURITY HEADERS (Helmet)
@@ -43,27 +41,54 @@ app.use(helmet({
 // 2. RATE LIMITING (Prevents DoS attacks)
 // ============================================
 
-// General limiter for most routes (NO custom keyGenerator needed)
+// Helper function to get client IP address
+const getClientIp = (req) => {
+  // Check for x-forwarded-for header (when behind proxy)
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    // Get the first IP from the list (client IP)
+    const ips = forwarded.split(',');
+    return ips[0].trim();
+  }
+  
+  // Check for cloudflare headers
+  if (req.headers['cf-connecting-ip']) {
+    return req.headers['cf-connecting-ip'];
+  }
+  
+  // Fallback to req.ip (Express' built-in IP detection)
+  return req.ip;
+};
+
+// General limiter for most routes
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 100, // 100 requests per IP
   standardHeaders: true,
   legacyHeaders: false,
-  // No custom keyGenerator - uses IP correctly by default
+  // Custom keyGenerator to handle proxy IPs correctly
+  keyGenerator: (req) => {
+    const clientIp = getClientIp(req);
+    console.log(`Rate limit key for IP: ${clientIp}`); // Optional: for debugging
+    return clientIp;
+  },
+  skip: (req) => {
+    // Optional: Skip rate limiting for health check
+    return req.path === '/health';
+  }
 });
 
 // Stricter limiter for sensitive routes
 const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 requests per IP
-  message: { success: false, message: "Too many attempts, please try again later." },
+  limit: 10, // 10 requests per IP
   standardHeaders: true,
   legacyHeaders: false,
-  // Using ipKeyGenerator helper for IPv6 support
   keyGenerator: (req) => {
-    // ipKeyGenerator expects an IP string, not the request object
-    return rateLimit.ipKeyGenerator(req.ip);
-  }
+    const clientIp = getClientIp(req);
+    return clientIp;
+  },
+  message: { success: false, message: "Too many attempts, please try again later." }
 });
 
 // Apply general limiter to all routes by default
@@ -75,13 +100,15 @@ app.use(generalLimiter);
 const allowedOrigins = [
   'https://www.joftasolemates.com.ng',
   'https://joftasolemates.com.ng',
+  'http://localhost:3000', // For local development
+  'http://localhost:5173', // For Vite development
 ].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
       console.warn(`Blocked CORS request from: ${origin}`);
@@ -132,16 +159,19 @@ app.use("/api/orders", orderRoutes);
 app.get("/health", (req, res) => {
   res.status(200).json({ 
     status: "ok",
-    time: Date.now()
+    time: Date.now(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Optional debug route to verify IP detection (remove in production)
+// Debug route to verify IP detection (remove in production)
 app.get("/debug-ip", (req, res) => {
   res.json({
+    clientIp: getClientIp(req),
     ip: req.ip,
     xForwardedFor: req.headers['x-forwarded-for'],
-    trustProxy: app.get('trust proxy')
+    trustProxy: app.get('trust proxy'),
+    cfConnectingIp: req.headers['cf-connecting-ip']
   });
 });
 
@@ -152,21 +182,40 @@ app.use((err, req, res, next) => {
   console.error("Error:", err.message);
   
   if (err.status === 429) {
-    return res.status(429).json({ success: false, message: "Too many requests. Please slow down." });
+    return res.status(429).json({ 
+      success: false, 
+      message: "Too many requests. Please slow down.",
+      retryAfter: Math.ceil(err.retryAfter || 60)
+    });
   }
   
   if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ success: false, message: "CORS policy blocked this request." });
+    return res.status(403).json({ 
+      success: false, 
+      message: "CORS policy blocked this request." 
+    });
   }
   
-  res.status(500).json({ success: false, message: "Internal server error" });
+  // Log full error in development
+  if (process.env.NODE_ENV === 'development') {
+    console.error(err.stack);
+  }
+  
+  res.status(500).json({ 
+    success: false, 
+    message: process.env.NODE_ENV === 'development' ? err.message : "Internal server error" 
+  });
 });
 
 // ============================================
 // 9. 404 HANDLER
 // ============================================
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: "Route not found" });
+  res.status(404).json({ 
+    success: false, 
+    message: "Route not found",
+    path: req.originalUrl
+  });
 });
 
 // ============================================
@@ -188,6 +237,7 @@ mongoose.connect(process.env.MONGO_URI)
       console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✅ CORS enabled for: ${allowedOrigins.join(', ')}`);
       console.log(`🔒 Trust proxy setting: ${app.get('trust proxy')}`);
+      console.log(`📊 Rate limiting active: 100 requests per 15 minutes`);
     });
     
     // ============================================
